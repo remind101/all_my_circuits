@@ -1,100 +1,129 @@
 module AllMyCircuits
-  class PercentageOverWindow
-    attr_reader :measure_window_seconds, :threshold_percent
-
-    def initialize(measure_window_seconds:, threshold_percent:)
-      @measure_window_seconds = measure_window_seconds
-      @threshold_percent = threshold_percent
-    end
-  end
-
   class Breaker
-    # TODO sub-second resolution
     # TODO concurrency
 
-    def initialize(name:, strategy:, sleep_window_seconds:, clock: Time)
+    def initialize(name:, strategy:)
       @name = name.dup
-      @sleep_window_seconds = sleep_window_seconds
-      @clock = clock
+
       strategy.delete(:name)
       @strategy = PercentageOverWindow.new(**strategy)
-
-      @open = false
-      @last_open_or_probed = nil
-
-      @errors_in_window = []
-      @succeeded_requests_in_window = []
-      @window_initialized_at = current_time
     end
 
     def run
-      unless allow_request?
+      unless @strategy.allow_request?
         raise BreakerOpen, @name
       end
 
       begin
         yield
-        success
+        @strategy.success
       rescue
-        error
+        @strategy.error
         raise
       end
     end
+  end
 
-    private
+  class PercentageOverWindow
+    def initialize(measure_window_seconds:, failure_rate_percent_threshold:, volume_threshold:, sleep_seconds:, clock: Clock)
+      @measure_window_seconds = measure_window_seconds
+      @failure_rate_percent_threshold = failure_rate_percent_threshold
+      @volume_threshold = volume_threshold
+      @sleep_seconds = sleep_seconds
+      @clock = clock
+
+      @open = false
+      @last_open_or_probed = nil
+
+      @window = Window.new(@measure_window_seconds, clock: @clock)
+    end
 
     def allow_request?
       !open? || allow_probe_request?
     end
 
+    def success
+      if @open
+        @open = false
+        @last_open_or_probed = nil
+        @window.reset!
+      end
+      @window << :succeeded
+    end
+
+    def error
+      @window << :failed
+    end
+
+    private
+
     def open?
       return true if @open
 
-      if requests_in_window > 0 && (@window_initialized_at + @strategy.measure_window_seconds) <= current_time
-        failure_percentage = ((errors_in_window.to_f / requests_in_window) * 100).ceil
-        if failure_percentage >= @strategy.threshold_percent
+      if @window.full? && @window.count >= @volume_threshold
+        failure_rate_percent = ((@window.count(:failed).to_f / @window.count) * 100).ceil
+        if failure_rate_percent >= @failure_rate_percent_threshold
           @open = true
-          @last_open_or_probed = current_time
+          @last_open_or_probed = @clock.timestamp
           return true
         end
       end
       false
     end
 
-    def errors_in_window
-      # memory leak
-      @errors_in_window.select { |e| e > current_time - @sleep_window_seconds }.count
-    end
-
-    def requests_in_window
-      # memory leak
-      @succeeded_requests_in_window.select { |e| e > current_time - @strategy.measure_window_seconds }.count +
-        @errors_in_window.count
-    end
-
     def allow_probe_request?
-      if @open && current_time >= (@last_open_or_probed + @sleep_window_seconds)
-        #side effect prolonging open window
-        @last_open_or_probed = current_time
+      if @open && @clock.timestamp >= (@last_open_or_probed + @sleep_seconds)
+        @last_open_or_probed = @clock.timestamp
         return true
       end
       false
     end
+  end
 
-    def success
-      @succeeded_requests_in_window.push current_time
-      if @open
-        @open = false
-        @last_open_or_probed = nil
+  # A 1-second resolution clock
+  class Clock
+    def timestamp
+      Time.now.to_i
+    end
+  end
+
+  class Window
+    def initialize(duration_seconds, clock: Clock)
+      @window_duration_seconds = duration_seconds
+      @clock = clock
+      reset!
+    end
+
+    def reset!
+      @events = []
+      @initialized_at_seconds = @clock.timestamp
+    end
+
+    def <<(event_type)
+      @events << Event.new(event_type, @clock.timestamp)
+      @events.keep_if { |e| within?(e) }
+      self
+    end
+
+    def count(event_type = nil)
+      if event_type
+        @events.count { |e| e.type == event_type && within?(e) }
+      else
+        @events.count { |e| within?(e) }
       end
     end
 
-    def error
-      @errors_in_window.push current_time
+    def full?
+      @clock.timestamp >= (@initialized_at_seconds + @window_duration_seconds)
     end
 
-    def current_time
-      @clock.now.to_f
+    private
+
+    def within?(event)
+      beginning = @clock.timestamp - @window_duration_seconds
+      event.timestamp > beginning
     end
   end
+
+  Event = Struct.new(:type, :timestamp)
 end
