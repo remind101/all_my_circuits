@@ -1,34 +1,7 @@
 module AllMyCircuits
-  class Breaker
-    # TODO concurrency
-
-    def initialize(name:, strategy:)
-      @name = name.dup
-
-      strategy.delete(:name)
-      @strategy = PercentageOverWindow.new(**strategy)
-    end
-
-    def run
-      unless @strategy.allow_request?
-        raise BreakerOpen, @name
-      end
-
-      begin
-        yield
-        @strategy.success
-      rescue
-        @strategy.error
-        raise
-      end
-    end
-  end
-
-  class PercentageOverWindow
-    def initialize(measure_window_seconds:, failure_rate_percent_threshold:, volume_threshold:, sleep_seconds:, clock: Clock)
+  class AbstractWindowStrategy
+    def initialize(measure_window_seconds:, sleep_seconds:, clock: Clock)
       @measure_window_seconds = measure_window_seconds
-      @failure_rate_percent_threshold = failure_rate_percent_threshold
-      @volume_threshold = volume_threshold
       @sleep_seconds = sleep_seconds
       @clock = clock
 
@@ -60,15 +33,16 @@ module AllMyCircuits
     def open?
       return true if @open
 
-      if @window.full? && @window.count >= @volume_threshold
-        failure_rate_percent = ((@window.count(:failed).to_f / @window.count) * 100).ceil
-        if failure_rate_percent >= @failure_rate_percent_threshold
-          @open = true
-          @last_open_or_probed = @clock.timestamp
-          return true
-        end
+      if @window.full? && should_open?
+        @open = true
+        @last_open_or_probed = @clock.timestamp
+        return true
       end
       false
+    end
+
+    def should_open?
+      raise NotImplementedError
     end
 
     def allow_probe_request?
@@ -80,9 +54,40 @@ module AllMyCircuits
     end
   end
 
+  class PercentageWindowStrategy < AbstractWindowStrategy
+    def initialize(failure_rate_percent_threshold:, volume_threshold:, **kwargs)
+      @failure_rate_percent_threshold = failure_rate_percent_threshold
+      @volume_threshold = volume_threshold
+      super(**kwargs)
+    end
+
+    private
+
+    def should_open?
+      unless @window.count >= @volume_threshold
+        return false
+      end
+      failure_rate_percent = ((@window.count(:failed).to_f / @window.count) * 100).ceil
+      failure_rate_percent >= @failure_rate_percent_threshold
+    end
+  end
+
+  class NumberWindowStrategy < AbstractWindowStrategy
+    def initialize(failures_threshold:, **kwargs)
+      @failures_threshold = failures_threshold
+      super(**kwargs)
+    end
+
+    private
+
+    def should_open?
+      @window.count(:failed) >= @failures_threshold
+    end
+  end
+
   # A 1-second resolution clock
   class Clock
-    def timestamp
+    def self.timestamp
       Time.now.to_i
     end
   end
@@ -126,4 +131,40 @@ module AllMyCircuits
   end
 
   Event = Struct.new(:type, :timestamp)
+
+  class Breaker
+    # TODO concurrency
+
+    STRATEGIES = {
+      nil                     => PercentageWindowStrategy,
+      :percentage_over_window => PercentageWindowStrategy,
+      :number_over_window    => NumberWindowStrategy
+    }
+
+    def initialize(name:, strategy:)
+      @name = name.dup
+
+      begin
+        strategy_name = strategy.delete(:name)
+        @strategy = STRATEGIES.fetch(strategy_name).new(**strategy)
+      rescue KeyError
+        raise ArgumentError, "Unknown circuit breaker strategy: #{strategy_name}"
+      end
+    end
+
+    def run
+      unless @strategy.allow_request?
+        raise BreakerOpen, @name
+      end
+
+      begin
+        yield
+        @strategy.success
+      rescue
+        @strategy.error
+        raise
+      end
+    end
+  end
+
 end

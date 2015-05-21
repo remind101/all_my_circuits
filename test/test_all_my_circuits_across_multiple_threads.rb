@@ -1,0 +1,95 @@
+require "minitest_helper"
+require "all_my_circuits"
+require "thread"
+
+class TestAllMyCircuitsAcrossMultipleThreads < AllMyCircuitsTC
+  WORKERS = 1
+  RESPONSE_TIME_SEC = 0.1
+
+  def setup
+    super
+    @requests_queue = Queue.new
+    @responses_queue = Queue.new
+    @breaker = AllMyCircuits::Breaker.new(
+      name: "test service circuit breaker",
+      strategy: {
+        name: :number_over_window,
+        measure_window_seconds: 3,
+        failures_threshold: 10,
+        sleep_seconds: 3
+      }
+    )
+  end
+
+  Request = Struct.new(:action, :duration)
+
+  test "does all the things" do
+    log "== normal mode of operation =="
+    workers = run_workers
+
+    n = 50
+    send_n_requests(n, :succeed)
+    assert_equal n, get_n_responses(n).count { |r| r == :succeeded }, "expected #{n} requests to succeed"
+
+    log "== failure mode of operation =="
+    n = 10
+    send_n_requests(n, :fail)
+    assert_equal n, get_n_responses(n).count { |r| r == :failed }, "expected #{n} requests to fail"
+
+    log "== circuit is open =="
+    n = 20
+    send_n_requests(n, :succeed)
+    assert_equal n, get_n_responses(n).count { |r| r == :skipped }, "expected #{n} requests to be skipped by circuit breaker"
+
+    sleep 3 # wait till circuit surely half-closes
+
+    log "== resume normal operation =="
+    send_n_requests(25, :succeed)
+    send_n_requests(5, :fail)
+    send_n_requests(70, :succeed)
+    responses = get_n_responses(100)
+    assert_equal 0, responses.count { |r| r == :skipped }, "expected no requests to be skipped"
+    assert_equal 5, responses.count { |r| r == :failed }, "expected 5 requests to fail"
+    assert_equal 95, responses.count { |r| r == :succeeded }, "expected 20 requests to succeed"
+
+    workers.each(&:kill)
+  end
+
+  def send_n_requests(n, action)
+    n.times { @requests_queue.push(Request.new(action, RESPONSE_TIME_SEC)) }
+  end
+
+  def get_n_responses(n)
+    n.times.map { @responses_queue.pop }
+  end
+
+  def run_workers
+    WORKERS.times.map do
+      Thread.new(@requests_queue, @responses_queue, @breaker) do |requests, responses, breaker|
+        loop do
+          request = requests.pop
+          begin
+            @breaker.run do
+              raise "service unavailable" if request.action == :fail
+              log "success"
+              responses.push :succeeded
+            end
+          rescue AllMyCircuits::BreakerOpen
+            log "breaker open"
+            responses.push :skipped
+          rescue
+            log "failure"
+            responses.push :failed
+          end
+          sleep request.duration
+        end
+      end
+    end
+  end
+
+  def log(msg)
+    @mtx ||= Mutex.new
+    timestamp = "%10.6f" % Time.now.to_f
+    @mtx.synchronize { puts "[#{Thread.current.object_id}] #{timestamp}: #{msg}" if ENV["DEBUG"] }
+  end
+end
