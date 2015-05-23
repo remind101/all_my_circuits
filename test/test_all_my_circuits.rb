@@ -27,8 +27,7 @@ class TestAllMyCircuits < AllMyCircuitsTC
       name: "test service circuit breaker",
       strategy: {
         name: :percentage_over_window,
-        measure_window_seconds: 4,
-        volume_threshold: 1,
+        requests_window: 4,
         failure_rate_percent_threshold: 50,
         sleep_seconds: 4,
         clock: @fake_clock
@@ -38,44 +37,32 @@ class TestAllMyCircuits < AllMyCircuitsTC
 
   test "trips the breaker and recovers upon first successful request" do
     assert_equal :succeeded, run_through_breaker { :success }
-    @fake_clock.advance
     assert_equal :failed, run_through_breaker { raise "massive fail" }
-    @fake_clock.advance
     assert_equal :succeeded, run_through_breaker { :success }
-    @fake_clock.advance
     assert_equal :failed, run_through_breaker { raise "another massive fail that trips the breaker" }
-    @fake_clock.advance
 
     4.times do
-      assert_equal :skipped, run_through_breaker { refute true, "this does not happen" }
+      assert_equal :skipped, run_through_breaker { assert false, "this does not happen" }
       @fake_clock.advance
     end
 
     assert_equal :succeeded, run_through_breaker { :success }
-    @fake_clock.advance
     assert_equal :failed, run_through_breaker { raise "failure that does not trip the breaker" }
-    @fake_clock.advance
     assert_equal :succeeded, run_through_breaker { :success }
-    @fake_clock.advance(10)
   end
 
   test "trips the breaker again if first call after reenable_after interval has failed" do
     assert_equal :succeeded, run_through_breaker { :success }
-    @fake_clock.advance
     assert_equal :failed, run_through_breaker { raise "massive fail" }
-    @fake_clock.advance
     assert_equal :succeeded, run_through_breaker { :success }
-    @fake_clock.advance
     assert_equal :failed, run_through_breaker { raise "another massive fail that trips the breaker" }
-    @fake_clock.advance
 
     4.times do
-      assert_equal :skipped, run_through_breaker { refute "this does not happen" }
+      assert_equal :skipped, run_through_breaker { assert false, "this does not happen" }
       @fake_clock.advance
     end
 
     assert_equal :failed, run_through_breaker { raise "trips the breaker again" }
-    @fake_clock.advance
     assert_equal :skipped, run_through_breaker { fail "this does not happen" }
   end
 

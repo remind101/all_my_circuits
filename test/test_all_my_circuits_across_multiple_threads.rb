@@ -3,8 +3,9 @@ require "all_my_circuits"
 require "thread"
 
 class TestAllMyCircuitsAcrossMultipleThreads < AllMyCircuitsTC
-  WORKERS = 1
-  RESPONSE_TIME_SEC = 0.1
+  WORKERS = Integer(ENV["CONCURRENCY_TEST_WORKERS"]) rescue 25
+  TEST_TIMES = Integer(ENV["CONCURRENCY_TEST_TIMES"]) rescue 1
+  RESPONSE_TIME_SEC = 0.05
 
   def setup
     super
@@ -14,44 +15,51 @@ class TestAllMyCircuitsAcrossMultipleThreads < AllMyCircuitsTC
       name: "test service circuit breaker",
       strategy: {
         name: :number_over_window,
-        measure_window_seconds: 3,
+        requests_window: 10,
         failures_threshold: 10,
-        sleep_seconds: 3
+        sleep_seconds: 2
       }
     )
   end
 
   Request = Struct.new(:action, :duration)
 
-  test "does all the things" do
-    log "== normal mode of operation =="
+  test "works properly in concurrent environment" do
     workers = run_workers
 
-    n = 50
-    send_n_requests(n, :succeed)
-    assert_equal n, get_n_responses(n).count { |r| r == :succeeded }, "expected #{n} requests to succeed"
+    TEST_TIMES.times do
+      log "== normal mode of operation =="
 
-    log "== failure mode of operation =="
-    n = 10
-    send_n_requests(n, :fail)
-    assert_equal n, get_n_responses(n).count { |r| r == :failed }, "expected #{n} requests to fail"
+      n = 50
+      send_n_requests(n, :succeed)
+      assert_equal n, get_n_responses(n).count { |r| r == :succeeded }, "expected #{n} requests to succeed"
 
-    log "== circuit is open =="
-    n = 20
-    send_n_requests(n, :succeed)
-    assert_equal n, get_n_responses(n).count { |r| r == :skipped }, "expected #{n} requests to be skipped by circuit breaker"
+      log "== failure mode of operation =="
+      n = 10
+      send_n_requests(n, :fail)
+      assert_equal n, get_n_responses(n).count { |r| r == :failed }, "expected #{n} requests to fail"
 
-    sleep 3 # wait till circuit surely half-closes
+      log "== circuit is open =="
+      n = 20
+      send_n_requests(n, :succeed)
+      assert_equal n, get_n_responses(n).count { |r| r == :skipped }, "expected #{n} requests to be skipped by circuit breaker"
 
-    log "== resume normal operation =="
-    send_n_requests(25, :succeed)
-    send_n_requests(5, :fail)
-    send_n_requests(70, :succeed)
-    responses = get_n_responses(100)
-    assert_equal 0, responses.count { |r| r == :skipped }, "expected no requests to be skipped"
-    assert_equal 5, responses.count { |r| r == :failed }, "expected 5 requests to fail"
-    assert_equal 95, responses.count { |r| r == :succeeded }, "expected 20 requests to succeed"
+      sleep 2 # wait till circuit surely half-closes
 
+      log "== resume normal operation =="
+      send_n_requests(1, :succeed)
+      assert_equal 1, get_n_responses(1).count { |r| r == :succeeded }, "expected successful request after circuit went half-open"
+
+      send_n_requests(25, :succeed)
+      send_n_requests(5, :fail)
+      send_n_requests(70, :succeed)
+      responses = get_n_responses(100)
+      assert_in_delta 0, responses.count { |r| r == :skipped }, WORKERS, "expected no more requests to be skipped than there are workers"
+      assert 5 >= responses.count { |r| r == :failed }, "expected up to 5 requests to fail (or be open-circuited)"
+      assert_in_delta 95, responses.count { |r| r == :succeeded }, WORKERS, "expected 95-WORKERS to 95 requests to succeed"
+
+      printf "+"
+    end
     workers.each(&:kill)
   end
 
@@ -66,6 +74,7 @@ class TestAllMyCircuitsAcrossMultipleThreads < AllMyCircuitsTC
   def run_workers
     WORKERS.times.map do
       Thread.new(@requests_queue, @responses_queue, @breaker) do |requests, responses, breaker|
+        random = Random.new
         loop do
           request = requests.pop
           begin
@@ -78,10 +87,10 @@ class TestAllMyCircuitsAcrossMultipleThreads < AllMyCircuitsTC
             log "breaker open"
             responses.push :skipped
           rescue
-            log "failure"
+            log "failure #{$!.inspect}: #{$!.backtrace.first(2).join(", ")}"
             responses.push :failed
           end
-          sleep request.duration
+          sleep random.rand(request.duration)
         end
       end
     end

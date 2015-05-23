@@ -1,44 +1,51 @@
+require "concurrent/atomic"
+
 module AllMyCircuits
   class AbstractWindowStrategy
-    def initialize(measure_window_seconds:, sleep_seconds:, clock: Clock)
-      @measure_window_seconds = measure_window_seconds
+    def initialize(requests_window:, sleep_seconds:, clock: Clock)
+      @requests_window = requests_window
       @sleep_seconds = sleep_seconds
       @clock = clock
 
       @open = false
       @last_open_or_probed = nil
 
-      @window = Window.new(@measure_window_seconds, clock: @clock)
+      @window = Window.new(@requests_window)
+
+      @state_mtx = Mutex.new
     end
 
     def allow_request?
-      !open? || allow_probe_request?
+      @state_mtx.synchronize do
+        !open? || allow_probe_request?
+      end
     end
 
     def success
-      if @open
-        @open = false
-        @last_open_or_probed = nil
-        @window.reset!
+      @state_mtx.synchronize do
+        if @open
+          @open = false
+          @last_open_or_probed = 0
+          @window.reset!
+        end
+        @window << :succeeded
       end
-      @window << :succeeded
     end
 
     def error
-      @window << :failed
+      @state_mtx.synchronize do
+        @window << :failed
+        if @window.full? && should_open?
+          @open = true
+          @last_open_or_probed = @clock.timestamp
+        end
+      end
     end
 
     private
 
     def open?
-      return true if @open
-
-      if @window.full? && should_open?
-        @open = true
-        @last_open_or_probed = @clock.timestamp
-        return true
-      end
-      false
+      @open
     end
 
     def should_open?
@@ -46,7 +53,7 @@ module AllMyCircuits
     end
 
     def allow_probe_request?
-      if @open && @clock.timestamp >= (@last_open_or_probed + @sleep_seconds)
+      if open? && @clock.timestamp >= (@last_open_or_probed + @sleep_seconds)
         @last_open_or_probed = @clock.timestamp
         return true
       end
@@ -55,18 +62,14 @@ module AllMyCircuits
   end
 
   class PercentageWindowStrategy < AbstractWindowStrategy
-    def initialize(failure_rate_percent_threshold:, volume_threshold:, **kwargs)
+    def initialize(failure_rate_percent_threshold:, **kwargs)
       @failure_rate_percent_threshold = failure_rate_percent_threshold
-      @volume_threshold = volume_threshold
       super(**kwargs)
     end
 
     private
 
     def should_open?
-      unless @window.count >= @volume_threshold
-        return false
-      end
       failure_rate_percent = ((@window.count(:failed).to_f / @window.count) * 100).ceil
       failure_rate_percent >= @failure_rate_percent_threshold
     end
@@ -93,52 +96,39 @@ module AllMyCircuits
   end
 
   class Window
-    def initialize(duration_seconds, clock: Clock)
-      @window_duration_seconds = duration_seconds
-      @clock = clock
+    def initialize(number_of_events)
+      @number_of_events = number_of_events
       reset!
     end
 
     def reset!
       @events = []
-      @initialized_at_seconds = @clock.timestamp
     end
 
     def <<(event_type)
-      @events << Event.new(event_type, @clock.timestamp)
-      @events.keep_if { |e| within?(e) }
+      @events << event_type
+      @events.shift if @events.count > @number_of_events
       self
     end
 
     def count(event_type = nil)
       if event_type
-        @events.count { |e| e.type == event_type && within?(e) }
+        @events.count { |e| e == event_type }
       else
-        @events.count { |e| within?(e) }
+        @events.count
       end
     end
 
     def full?
-      @clock.timestamp >= (@initialized_at_seconds + @window_duration_seconds)
-    end
-
-    private
-
-    def within?(event)
-      beginning = @clock.timestamp - @window_duration_seconds
-      event.timestamp > beginning
+      @events.count == @number_of_events
     end
   end
 
-  Event = Struct.new(:type, :timestamp)
-
   class Breaker
-    # TODO concurrency
-
     STRATEGIES = {
       nil                     => PercentageWindowStrategy,
       :percentage_over_window => PercentageWindowStrategy,
-      :number_over_window    => NumberWindowStrategy
+      :number_over_window     => NumberWindowStrategy
     }
 
     def initialize(name:, strategy:)
