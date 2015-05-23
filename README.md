@@ -1,39 +1,62 @@
 # AllMyCircuits
+![funny image goes here](https://raw.githubusercontent.com/remind101/all_my_circuits/master/all_my_circuits.jpg?token=AAc0YcX8xOhT0o4_Ko-IxKEEQk2PTUJYks5VaR0ywA%3D%3D)
 
-Welcome to your new gem! In this directory, you'll find the files you need to be able to package up your Ruby library into a gem. Put your Ruby code in the file `lib/all_my_circuits`. To experiment with that code, run `bin/console` for an interactive prompt.
+AllMyCircuits is intended to be threadsafe circuit breaker implementation for Ruby (although it is not just yet).
 
-TODO: Delete this and the text above, and describe your gem
+# Usage
 
-## Installation
+    class MyService
+      include Singleton
 
-Add this line to your application's Gemfile:
+      def initialize
+        @circuit_breaker = AllMyCircuits::Breaker.new(
+          name: "my_service",
+          strategy: {
+            name: :percentage_over_window,
+            requests_window: 100,                       # number of requests to calculate the average failure rate for
+            failure_rate_percent_threshold: 25,         # open circuit if 25% or more requests within 100-request window fail
+            sleep_seconds: 10                           # leave circuit open for 10 seconds, than try the service again
+                                                        #   must trip open again if the first request fails
+          }
+        )
+      end
 
-```ruby
-gem 'all_my_circuits'
-```
+      def run
+        begin
+          @breaker.run do
+            Timeout.timeout(1.0) { my_risky_call }
+          end
+        rescue AllMyCircuits::BreakerOpen => e
+          # log me somewhere
+        rescue
+          # uh-oh, risky call failed once
+        end
+      end
+    end
 
-And then execute:
+# Testing
 
-    $ bundle
+So, what have we got:
 
-Or install it yourself as:
+  * Time-sensitive code: ...check
+  * Concurrent code:     ...check
 
-    $ gem install all_my_circuits
+Dude, that's a real headache for someone who's not confortable enough with concurrent code.
+I haven't figured any awesome way of automated testing in this case.
+So, in the [script](https://github.com/remind101/all_my_circuits/tree/master/script) folder, there are:
 
-## Usage
+  * [fake_service.rb](https://github.com/remind101/all_my_circuits/blob/master/script/fake_service.rb)
+  * [graphing_stress_test.rb](https://github.com/remind101/all_my_circuits/blob/master/script/graphing_stress_test.rb)
 
-TODO: Write usage instructions here
+## fake_service.rb
 
-## Development
+the Fake Service has 3 modes of operation: `up` (default), `die` and `slowdown`.
 
-After checking out the repo, run `bin/setup` to install dependencies. Then, run `bin/console` for an interactive prompt that will allow you to experiment.
+  * `up` (default) - http://localhost:8081/up - normal mode of operation, latency up to 50ms
+  * `die` - http://localhost:8081/die - exceptions are raised left and right, slight delay in response
+  * `slowdown` - http://localhost:8081/slowdown - successful responses with a significant delay.
 
-To install this gem onto your local machine, run `bundle exec rake install`. To release a new version, update the version number in `version.rb`, and then run `bundle exec rake release` to create a git tag for the version, push git commits and tags, and push the `.gem` file to [rubygems.org](https://rubygems.org).
+## Graphing Stress Test
 
-## Contributing
-
-1. Fork it ( https://github.com/[my-github-username]/all_my_circuits/fork )
-2. Create your feature branch (`git checkout -b my-new-feature`)
-3. Commit your changes (`git commit -am 'Add some feature'`)
-4. Push to the branch (`git push origin my-new-feature`)
-5. Create a new Pull Request
+runs `WORKERS` number of workers which continuously hit http://localhost:8081. Graphs are served at http://localhost:8080.
+This app allows to catch incorrect circuit breaker behavior visually.
