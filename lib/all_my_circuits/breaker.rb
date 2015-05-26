@@ -7,8 +7,8 @@ module AllMyCircuits
       @sleep_seconds = sleep_seconds
       @clock = clock
 
-      @open = false
       @last_open_or_probed = nil
+      @opened_at_request_number = 0
 
       @window = Window.new(@requests_window)
 
@@ -21,23 +21,25 @@ module AllMyCircuits
       end
     end
 
-    def success
+    def success(current_request_number, _)
       @state_mtx.synchronize do
-        if @open
-          @open = false
+        if open? && current_request_number > @opened_at_request_number
           @last_open_or_probed = 0
+          @opened_at_request_number = 0
           @window.reset!
         end
         @window << :succeeded
       end
     end
 
-    def error
+    def error(current_request_number, most_recent_request_number)
       @state_mtx.synchronize do
-        @window << :failed
-        if @window.full? && should_open?
-          @open = true
-          @last_open_or_probed = @clock.timestamp
+        unless open?
+          @window << :failed
+          if @window.full? && should_open?
+            @last_open_or_probed = @clock.timestamp
+            @opened_at_request_number = most_recent_request_number
+          end
         end
       end
     end
@@ -45,7 +47,7 @@ module AllMyCircuits
     private
 
     def open?
-      @open
+      @opened_at_request_number > 0
     end
 
     def should_open?
@@ -88,10 +90,9 @@ module AllMyCircuits
     end
   end
 
-  # A 1-second resolution clock
   class Clock
     def self.timestamp
-      Time.now.to_i
+      Time.now
     end
   end
 
@@ -137,6 +138,7 @@ module AllMyCircuits
       begin
         strategy_name = strategy.delete(:name)
         @strategy = STRATEGIES.fetch(strategy_name).new(**strategy)
+        @request_number = Concurrent::Atomic.new(0)
       rescue KeyError
         raise ArgumentError, "Unknown circuit breaker strategy: #{strategy_name}"
       end
@@ -147,11 +149,13 @@ module AllMyCircuits
         raise BreakerOpen, @name
       end
 
+      current_request_number = @request_number.update { |v| v + 1 }
+
       begin
         yield
-        @strategy.success
+        @strategy.success(current_request_number, @request_number.value)
       rescue
-        @strategy.error
+        @strategy.error(current_request_number, @request_number.value)
         raise
       end
     end

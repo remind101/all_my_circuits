@@ -53,9 +53,9 @@ def run_workers
             http = Net::HTTP.new(uri.host, uri.port)
             http.open_timeout = 2
             http.read_timeout = 2
-            http.start do |http|
+            http.start do |h|
               request = Net::HTTP::Get.new(uri)
-              response = http.request request
+              response = h.request(request)
               response.value
               log "success"
               responses.push(status: :succeeded, started: t1, finished: Time.now)
