@@ -8,15 +8,27 @@ class Stream
   end
 
   def each
+    batch_proto = { succeeded: 0, failed: 0, skipped: 0 }.freeze
+    next_batch = batch_proto.dup
     loop do
-      data_batch = []
-      frame_start = Time.now
-      while Time.now.to_i == frame_start.to_i
-        data_batch << @data_queue.pop
+      data_batch = next_batch
+      next_batch = batch_proto.dup
+      frame_end = Time.now + 1
+      begin
+        while r = @data_queue.pop(true)
+          if r[:finished] <= frame_end
+            data_batch[r[:status]] += 1
+          else
+            next_batch[r[:status]] += 1
+            break
+          end
+        end
+      rescue ThreadError # queue exhausted
+        sleep 0.0001
+        retry
       end
-      counts = { succeeded: 0, failed: 0, skipped: 0, currentTime: frame_start.to_f * 1000 }.
-        merge(Hash[data_batch.group_by { |p| p[:status] }.map { |status, points| [status, points.length] }])
-      serialized = "data: %s\n\n" % counts.to_json
+      data_batch[:currentTime] = frame_end.to_f * 1000
+      serialized = "data: %s\n\n" % data_batch.to_json
       yield serialized
     end
   end
@@ -35,7 +47,7 @@ class GraphingServer
     <!DOCTYPE html>
     <html>
       <head>
-        <title>AlLMyCircuits Stress Test Graph</title>
+        <title>AllMyCircuits Stress Test Graph</title>
         <script src="//cdnjs.cloudflare.com/ajax/libs/jquery/2.1.4/jquery.min.js" type="text/javascript"></script>
         <script src="https://rawgit.com/joewalnes/smoothie/master/smoothie.js" type="text/javascript"></script>
         <style type="text/css">
@@ -52,28 +64,44 @@ class GraphingServer
         <canvas id="workersFailure" width="1000" height="300"></canvas>
         <canvas id="workersSkip" width="1000" height="300"></canvas>
         <script type="text/javascript">
-          var workersSuccessChart = new SmoothieChart({ interpolation: 'step', minValue: 0, maxValueScale: 1.2 });
-          workersSuccessChart.streamTo(document.getElementById("workersSuccess"), 1000);
-          var succeededCount = new TimeSeries();
-          workersSuccessChart.addTimeSeries(succeededCount, { strokeStyle: "rgb(0, 255, 0)" });
+          var chartHeight = window.innerHeight / 3 - 20;
+          var chartWidth = window.innerWidth - 20;
 
-          var workersFailureChart = new SmoothieChart({ interpolation: 'step', minValue: 0, maxValueScale: 1.2 });
-          workersFailureChart.streamTo(document.getElementById("workersFailure"), 1000);
-          var failedCount = new TimeSeries();
-          workersFailureChart.addTimeSeries(failedCount, { strokeStyle: "rgb(255, 0, 0)" });
+          var charts = {
+            succeeded: {
+              elementId: "workersSuccess",
+              color: "rgb(0, 255, 0)"
+            },
+            failed: {
+              elementId: "workersFailure",
+              color: "rgb(255, 0, 0)"
+            },
+            skipped: {
+              elementId: "workersSkip",
+              color: "rgb(255, 255, 255)"
+            }
+          };
 
-          var workersSkipChart = new SmoothieChart({ interpolation: 'step', minValue: 0, maxValueScale: 1.2 });
-          workersSkipChart.streamTo(document.getElementById("workersSkip"), 1000);
-          var skippedCount = new TimeSeries();
-          workersSkipChart.addTimeSeries(skippedCount, { strokeStyle: "rgb(255, 255, 255)" });
+          for (var chart in charts) {
+            var chartConfig = charts[chart];
+            var el = document.getElementById(chartConfig.elementId);
+            el.height = chartHeight;
+            el.width = chartWidth;
+
+            var chart = new SmoothieChart({ interpolation: 'step', minValue: 0, maxValueScale: 1.2 });
+            chart.streamTo(el, 1000);
+
+            chartConfig.series = new TimeSeries();
+            chart.addTimeSeries(chartConfig.series, { strokeStyle: chartConfig.color });
+          }
 
           var source = new EventSource("/data");
           source.onmessage = function(event) {
             var points = JSON.parse(event.data);
             var currentTime = points.currentTime;
-            succeededCount.append(currentTime, points.succeeded);
-            failedCount.append(currentTime, points.failed);
-            skippedCount.append(currentTime, points.skipped);
+            charts.succeeded.series.append(currentTime, points.succeeded);
+            charts.failed.series.append(currentTime, points.failed);
+            charts.skipped.series.append(currentTime, points.skipped);
           };
         </script>
       </body>
