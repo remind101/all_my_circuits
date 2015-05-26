@@ -18,7 +18,7 @@ def setup
     name: "test service circuit breaker",
     strategy: {
       name: :percentage_over_window,
-      requests_window: 20,
+      requests_window: 40,
       failure_rate_percent_threshold: 25,
       sleep_seconds: 10
     }
@@ -38,13 +38,8 @@ def run
   workers = run_workers
   graphing_server = run_graphing_server
 
-  loop do
-    response = @responses_queue.pop
-    @datapoints_queue.push(response)
-  end
-
-  workers.each(&:kill)
-  graphing_server.kill
+  workers.each(&:join)
+  graphing_server.join
 end
 
 def run_workers
@@ -54,19 +49,24 @@ def run_workers
         begin
           t1 = Time.now
           @breaker.run do
-            Timeout.timeout(2) do
-              response = Net::HTTP.get_response(URI("http://localhost:8081"))
+            uri = URI("http://localhost:8081")
+            http = Net::HTTP.new(uri.host, uri.port)
+            http.open_timeout = 2
+            http.read_timeout = 2
+            http.start do |http|
+              request = Net::HTTP::Get.new(uri)
+              response = http.request request
               response.value
               log "success"
-              responses.push(status: :succeeded, started: t1.to_f, finished: Time.now.to_f)
+              responses.push(status: :succeeded, started: t1, finished: Time.now)
             end
           end
-        rescue AllMyCircuits::BreakerOpen, CB2::BreakerOpen
+        rescue AllMyCircuits::BreakerOpen#, CB2::BreakerOpen
           log "breaker open"
-          responses.push(status: :skipped, started: t1.to_f, finished: Time.now.to_f)
+          responses.push(status: :skipped, started: t1, finished: Time.now)
         rescue
           log "failure #{$!.inspect}: #{$!.backtrace.first(2).join(", ")}"
-          responses.push(status: :failed, started: t1.to_f, finished: Time.now.to_f)
+          responses.push(status: :failed, started: t1, finished: Time.now)
         end
       end
     end
@@ -74,8 +74,8 @@ def run_workers
 end
 
 def run_graphing_server
-  Thread.new(@datapoints_queue) do |datapoints_queue|
-    GraphingServer.start(datapoints_queue)
+  Thread.new(@responses_queue) do |responses_queue|
+    GraphingServer.start(responses_queue)
   end
 end
 

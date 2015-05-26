@@ -16,13 +16,13 @@ class FakeService
   def call(env)
     case @state
     when :up
-      sleep @random.rand(0.050)
+      sleep @random.rand(0.100)
       [200, { "Content-Type" => "text/html" }, ["up"]]
     when :die
       sleep @random.rand(1.000)
       [500, { "Content-Type" => "text/html" }, ["down"]]
     when :slowdown
-      sleep @random.rand(10.000)
+      sleep @random.rand(5.000)
       [200, { "Content-Type" => "text/html" }, ["slooow"]]
     else
       fail "what is that again?"
