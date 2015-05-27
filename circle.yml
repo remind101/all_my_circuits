@@ -1,0 +1,12 @@
+machine:
+  ruby:
+    version:
+      2.2.2
+
+dependencies:
+  pre:
+    - gem install bundler -v "~> 1.9"
+
+test:
+  override:
+    - rake test

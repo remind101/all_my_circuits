@@ -1,4 +1,7 @@
 # AllMyCircuits
+
+[![Circle CI](https://circleci.com/gh/remind101/all_my_circuits.svg?style=svg&circle-token=3c0f7294a61e095f789f369f96bdd266ddd80258)](https://circleci.com/gh/remind101/all_my_circuits)
+
 ![funny image goes here](https://raw.githubusercontent.com/remind101/all_my_circuits/master/all_my_circuits.jpg?token=AAc0YcX8xOhT0o4_Ko-IxKEEQk2PTUJYks5VaR0ywA%3D%3D)
 
 AllMyCircuits is intended to be a threadsafe-ish circuit breaker implementation for Ruby.
