@@ -64,7 +64,6 @@ This app allows to catch incorrect circuit breaker behavior visually.
 
 # TODO
 
-  * report state changes (honeybadger? librato?)
   * global controls through redis?
   * look for specific exceptions
 
