@@ -21,7 +21,10 @@ module AllMyCircuits
       end
 
       def should_open?
-        @window.full? && @window.count(:failed) >= @failures_threshold
+        return unless @window.full?
+
+        failures = @window.count(:failed)
+        failures >= @failures_threshold
       end
     end
 
