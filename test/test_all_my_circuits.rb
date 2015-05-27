@@ -1,8 +1,6 @@
 require "minitest_helper"
 
 class TestAllMyCircuits < AllMyCircuitsTC
-  class SimulatedFailure < StandardError; end
-
   test "has version number" do
     refute_nil ::AllMyCircuits::VERSION
   end
@@ -14,11 +12,10 @@ class TestAllMyCircuits < AllMyCircuitsTC
       name: "test service circuit breaker",
       sleep_seconds: 4,
       clock: @fake_clock,
-      strategy: {
-        name: :percentage_over_window,
+      strategy: AllMyCircuits::Strategies::PercentageOverWindowStrategy.new(
         requests_window: 4,
         failure_rate_percent_threshold: 50
-      }
+      )
     )
   end
 
