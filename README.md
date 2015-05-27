@@ -1,7 +1,7 @@
 # AllMyCircuits
 ![funny image goes here](https://raw.githubusercontent.com/remind101/all_my_circuits/master/all_my_circuits.jpg?token=AAc0YcX8xOhT0o4_Ko-IxKEEQk2PTUJYks5VaR0ywA%3D%3D)
 
-AllMyCircuits is intended to be threadsafe circuit breaker implementation for Ruby (although it is not just yet).
+AllMyCircuits is intended to be a threadsafe circuit breaker implementation for Ruby.
 See [Martin Fowler's article on the Circuit Breaker pattern for more info](http://martinfowler.com/bliki/CircuitBreaker.html).
 
 # Usage
