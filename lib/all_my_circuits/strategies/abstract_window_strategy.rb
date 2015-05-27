@@ -1,7 +1,7 @@
 module AllMyCircuits
   module Strategies
 
-    class AbstractWindowStrategy
+    class AbstractWindowStrategy < AbstractStrategy
       autoload :Window, "all_my_circuits/strategies/abstract_window_strategy/window"
 
       def initialize(requests_window:)
