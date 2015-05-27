@@ -27,12 +27,12 @@ class TestAllMyCircuits < AllMyCircuitsTC
     @fake_clock = FakeClock.new
     @breaker = AllMyCircuits::Breaker.new(
       name: "test service circuit breaker",
+      sleep_seconds: 4,
+      clock: @fake_clock,
       strategy: {
         name: :percentage_over_window,
         requests_window: 4,
-        failure_rate_percent_threshold: 50,
-        sleep_seconds: 4,
-        clock: @fake_clock
+        failure_rate_percent_threshold: 50
       }
     )
   end

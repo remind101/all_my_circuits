@@ -16,11 +16,11 @@ def setup
   @responses_queue = Queue.new
   @breaker = AllMyCircuits::Breaker.new(
     name: "test service circuit breaker",
+    sleep_seconds: 10,
     strategy: {
       name: :percentage_over_window,
       requests_window: 40,
-      failure_rate_percent_threshold: 25,
-      sleep_seconds: 10
+      failure_rate_percent_threshold: 25
     }
   )
   # @breaker = CB2::Breaker.new(

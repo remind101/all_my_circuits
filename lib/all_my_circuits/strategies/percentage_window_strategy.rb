@@ -7,9 +7,8 @@ module AllMyCircuits
         super(**kwargs)
       end
 
-      private
-
       def should_open?
+        return false unless @window.full?
         failure_rate_percent = ((@window.count(:failed).to_f / @window.count) * 100).ceil
         failure_rate_percent >= @failure_rate_percent_threshold
       end

@@ -12,11 +12,11 @@ See [Martin Fowler's article on the Circuit Breaker pattern for more info](http:
       def initialize
         @circuit_breaker = AllMyCircuits::Breaker.new(
           name: "my_service",
+          sleep_seconds: 10,                            # leave circuit open for 10 seconds, than try to call the service again
           strategy: {
             name: :percentage_over_window,
             requests_window: 100,                       # number of requests to calculate the average failure rate for
-            failure_rate_percent_threshold: 25,         # open circuit if 25% or more requests within 100-request window fail
-            sleep_seconds: 10                           # leave circuit open for 10 seconds, than try the service again
+            failure_rate_percent_threshold: 25          # open circuit if 25% or more requests within 100-request window fail
                                                         #   must trip open again if the first request fails
           }
         )
@@ -61,3 +61,10 @@ the Fake Service has 3 modes of operation: `up` (default), `die` and `slowdown`.
 
 runs `WORKERS` number of workers which continuously hit http://localhost:8081. Graphs are served at http://localhost:8080.
 This app allows to catch incorrect circuit breaker behavior visually.
+
+# TODO
+
+  * report state changes (honeybadger? librato?)
+  * global controls through redis?
+  * look for specific exceptions
+
