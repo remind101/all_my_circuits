@@ -1,4 +1,5 @@
 require "concurrent/atomic"
+require "thread"
 
 module AllMyCircuits
 
@@ -16,42 +17,51 @@ module AllMyCircuits
     #
     # Options
     #
-    #   name     - name of the call wrapped into circuit breaker (e.g. "That Unstable Service").
-    #   strategy - a hash with circuit breaker behavior config; varies per strategy.
-    #              Available strategies: :percentage_over_window (default), :number_over_window.
+    #   name          - name of the call wrapped into circuit breaker (e.g. "That Unstable Service").
+    #   sleep_seconds - number of seconds the circuit stays open before attempting to close.
+    #   strategy      - a hash with circuit breaker behavior config; varies per strategy.
+    #                   Available strategies:
+    #                     :percentage_over_window (default),
+    #                     :number_over_window.
     #
     # Examples
     #
     #   AllMyCircuits::Breaker.new(
     #     "My Unstable Service",
+    #     sleep_seconds: 5,
     #     strategy: {
     #       name: :percentage_over_window,
     #       requests_window: 20,                 # number of requests in the window to calculate failure rate for
-    #       sleep_seconds: 5,                    # how long should the circuit stay open
     #       failure_rate_percent_threshold: 25   # how many failures can occur within the window, in percent,
     #     }                                      #   before the circuit opens
     #   )
     #
     #   AllMyCircuits::Breaker.new(
     #     "Another Unstable Service",
+    #     sleep_seconds: 5,
     #     strategy: {
     #       name: :number_over_window,
     #       requests_window: 20,
-    #       sleep_seconds: 5,
     #       failures_threshold: 25         # how many failures can occur within the window before the circuit opens
     #     }
     #   )
     #
-    def initialize(name:, strategy:)
-      @name = name.dup
-
+    def initialize(name:, strategy:, sleep_seconds:, clock: Clock)
       begin
         strategy_name = strategy.delete(:name)
+        # ALL access to the @strategy must happen while holding the @state_lock!
         @strategy = STRATEGIES.fetch(strategy_name).new(**strategy)
-        @request_number = Concurrent::Atomic.new(0)
       rescue KeyError
         raise ArgumentError, "Unknown circuit breaker strategy: #{strategy_name}"
       end
+
+      @name = name.dup
+      @sleep_seconds = sleep_seconds
+      @clock = clock
+      @state_lock = Mutex.new
+      @request_number = Concurrent::Atomic.new(0)
+      @last_open_or_probed = nil
+      @opened_at_request_number = 0
     end
 
     # Public: executes supplied block of code and monitors failures.
@@ -91,11 +101,11 @@ module AllMyCircuits
     #
     #   @cb = AllMyCircuits::Breaker.new(
     #     "that bad service",
+    #     sleep_seconds: 5,
     #     strategy: {
     #       name: :percentage_over_window,
     #       requests_window: 10,
-    #       failure_rate_percent_threshold: 50,
-    #       sleep_seconds: 5,
+    #       failure_rate_percent_threshold: 50
     #     }
     #   )
     #
@@ -113,7 +123,7 @@ module AllMyCircuits
     #   end
     #
     def run
-      unless @strategy.allow_request?
+      unless allow_request?
         raise BreakerOpen, @name
       end
 
@@ -121,11 +131,83 @@ module AllMyCircuits
 
       begin
         yield
-        @strategy.success(current_request_number, @request_number.value)
+        success(current_request_number)
       rescue
-        @strategy.error(current_request_number, @request_number.value)
+        error(current_request_number)
         raise
       end
+    end
+
+    private
+
+    # Internal: checks whether the circuit is closed, or if it is time
+    # to try one request to see if things are back to normal.
+    #
+    def allow_request?
+      @state_lock.synchronize do
+        !open? || allow_probe_request?
+      end
+    end
+
+    # Internal: markes request as successful. Closes the circuit if necessary.
+    #
+    # Arguments
+    #   current_request_number - the number assigned to the request by the circuit breaker
+    #                            before it was sent.
+    #
+    def success(current_request_number)
+      @state_lock.synchronize do
+        # This ensures that we are not closing the circuit prematurely
+        # due to a response for an old request coming in.
+        if open? && current_request_number > @opened_at_request_number
+          close!
+        end
+        @strategy.success
+      end
+    end
+
+    # Internal: marks request as failed. Opens the circuit if necessary.
+    #
+    def error(_)
+      @state_lock.synchronize do
+        return if open?
+        @strategy.error
+        if @strategy.should_open?
+          open!
+        end
+      end
+    end
+
+    def open?
+      @opened_at_request_number > 0
+    end
+
+    def allow_probe_request?
+      if open? && @clock.timestamp >= (@last_open_or_probed + @sleep_seconds)
+        # makes sure that we allow only one probe request by extending sleep interval
+        # and leaving the circuit open until closed by the success callback.
+        @last_open_or_probed = @clock.timestamp
+        return true
+      end
+      false
+    end
+
+    def open!
+      @last_open_or_probed = @clock.timestamp
+      # The most recent request encountered so far (may not be the current request in concurrent situation).
+      # This is necessary to prevent successful response to old request from opening the circuit prematurely.
+      # Imagine concurrent situation ("|" for request start, ">" for request end):
+      #   1|-----------> success
+      #     2|----> error, open circuit breaker
+      # In this case request 1) should not close the circuit.
+      @opened_at_request_number = @request_number.value
+      @strategy.opened
+    end
+
+    def close!
+      @last_open_or_probed = 0
+      @opened_at_request_number = 0
+      @strategy.closed
     end
   end
 

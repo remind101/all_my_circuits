@@ -7,10 +7,8 @@ module AllMyCircuits
         super(**kwargs)
       end
 
-      private
-
       def should_open?
-        @window.count(:failed) >= @failures_threshold
+        @window.full? && @window.count(:failed) >= @failures_threshold
       end
     end
 
