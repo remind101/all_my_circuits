@@ -6,11 +6,23 @@ module AllMyCircuits
   class Breaker
     attr_reader :name
 
+    # Public: exceptions typically thrown when using Net::HTTP
+    #
+    def self.net_errors
+      require "timeout"
+      require "net/http"
+
+      [Timeout::Error, Errno::ECONNRESET, Errno::ECONNREFUSED, EOFError,
+       Net::HTTPBadResponse, Net::HTTPHeaderSyntaxError, Net::HTTPFatalError, Net::HTTPServerError]
+    end
+
     # Public: Initializes circuit breaker instance.
     #
     # Options
     #
     #   name          - name of the call wrapped into circuit breaker (e.g. "That Unstable Service").
+    #   watch_errors  - exceptions to count as failures. Other exceptions will simply get re-raised
+    #                   (default: AllMyCircuits::Breaker.net_errors).
     #   sleep_seconds - number of seconds the circuit stays open before attempting to close.
     #   strategy      - an AllMyCircuits::Strategies::AbstractStrategy-compliant object that controls
     #                   when the circuit should be tripped open.
@@ -42,9 +54,16 @@ module AllMyCircuits
     #     )
     #   )
     #
-    def initialize(name:, sleep_seconds:, strategy:, notifier: Notifiers::NullNotifier.new, clock: Clock)
-      @name = name.dup.freeze
-      @sleep_seconds = sleep_seconds
+    def initialize(name:,
+                   watch_errors: Breaker.net_errors,
+                   sleep_seconds:,
+                   strategy:,
+                   notifier: Notifiers::NullNotifier.new,
+                   clock: Clock)
+
+      @name = String(name).dup.freeze
+      @watch_errors = Array(watch_errors).dup
+      @sleep_seconds = Integer(sleep_seconds)
 
       @strategy = strategy
       @notifier = notifier
@@ -123,7 +142,7 @@ module AllMyCircuits
       begin
         yield
         success(current_request_number)
-      rescue
+      rescue *@watch_errors
         error(current_request_number)
         raise
       end

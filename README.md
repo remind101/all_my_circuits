@@ -15,6 +15,8 @@ See [Martin Fowler's article on the Circuit Breaker pattern for more info](http:
       def initialize
         @circuit_breaker = AllMyCircuits::Breaker.new(
           name: "my_service",
+          watch_errors: [Timeout::Error],               # defaults to AllMyCircuits::Breaker.net_errors,
+                                                        #   which includes typical net/http and socket errors
           sleep_seconds: 10,                            # leave circuit open for 10 seconds, than try to call the service again
           strategy: AllMyCircuits::Strategies::PercentageOverWindowStrategy.new(
             requests_window: 100,                       # number of requests to calculate the average failure rate for
@@ -67,5 +69,4 @@ This app allows to catch incorrect circuit breaker behavior visually.
 # TODO
 
   * global controls through redis?
-  * look for specific exceptions
 

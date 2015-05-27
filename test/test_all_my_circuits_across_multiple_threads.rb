@@ -12,6 +12,7 @@ class TestAllMyCircuitsAcrossMultipleThreads < AllMyCircuitsTC
     @responses_queue = Queue.new
     @breaker = AllMyCircuits::Breaker.new(
       name: "test service circuit breaker",
+      watch_errors: [SimulatedFailure],
       sleep_seconds: 2,
       strategy: AllMyCircuits::Strategies::NumberOverWindowStrategy.new(
         requests_window: 10,
