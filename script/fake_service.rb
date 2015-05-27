@@ -8,7 +8,6 @@ class FakeService
   attr_accessor :state
 
   def initialize
-    p "here"
     @random = Random.new
     @state = :up
   end
