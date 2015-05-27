@@ -10,6 +10,7 @@ class TestAllMyCircuits < AllMyCircuitsTC
     @fake_clock = FakeClock.new
     @breaker = AllMyCircuits::Breaker.new(
       name: "test service circuit breaker",
+      watch_errors: [SimulatedFailure],
       sleep_seconds: 4,
       clock: @fake_clock,
       strategy: AllMyCircuits::Strategies::PercentageOverWindowStrategy.new(

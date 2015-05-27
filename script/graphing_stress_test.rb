@@ -15,7 +15,7 @@ def setup
   @responses_queue = Queue.new
   @breaker = AllMyCircuits::Breaker.new(
     name: "test service circuit breaker",
-    sleep_seconds: 10,
+    sleep_seconds: 5,
     strategy: AllMyCircuits::Strategies::PercentageOverWindowStrategy.new(
       requests_window: 40,
       failure_rate_percent_threshold: 25
