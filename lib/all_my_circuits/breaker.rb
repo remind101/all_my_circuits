@@ -13,6 +13,14 @@ module AllMyCircuits
       :number_over_window     => Strategies::NumberWindowStrategy
     }
 
+    # Extend this dictionary to add more notifiers
+    #
+    NOTIFIERS = {
+      nil          => Notifiers::NullNotifier
+    }
+
+    attr_reader :name
+
     # Public: Initializes circuit breaker instance.
     #
     # Options
@@ -23,11 +31,14 @@ module AllMyCircuits
     #                   Available strategies:
     #                     :percentage_over_window (default),
     #                     :number_over_window.
+    #   notifier      - optional hash with circuit breaker notifier config; varies per notifier.
+    #                   Available notifiers:
+    #                     :null (default).
     #
     # Examples
     #
     #   AllMyCircuits::Breaker.new(
-    #     "My Unstable Service",
+    #     name: "My Unstable Service",
     #     sleep_seconds: 5,
     #     strategy: {
     #       name: :percentage_over_window,
@@ -37,7 +48,7 @@ module AllMyCircuits
     #   )
     #
     #   AllMyCircuits::Breaker.new(
-    #     "Another Unstable Service",
+    #     name: "Another Unstable Service",
     #     sleep_seconds: 5,
     #     strategy: {
     #       name: :number_over_window,
@@ -46,7 +57,10 @@ module AllMyCircuits
     #     }
     #   )
     #
-    def initialize(name:, strategy:, sleep_seconds:, clock: Clock)
+    def initialize(name:, sleep_seconds:, strategy:, notifier: {}, clock: Clock)
+      @name = name.dup.freeze
+      @sleep_seconds = sleep_seconds
+
       begin
         strategy_name = strategy.delete(:name)
         # ALL access to the @strategy must happen while holding the @state_lock!
@@ -55,13 +69,18 @@ module AllMyCircuits
         raise ArgumentError, "Unknown circuit breaker strategy: #{strategy_name}"
       end
 
-      @name = name.dup
-      @sleep_seconds = sleep_seconds
-      @clock = clock
+      begin
+        notifier_name = notifier.delete(:name)
+        @notifier = NOTIFIERS.fetch(notifier_name).new(@name, **notifier)
+      rescue KeyError
+        raise ArgumentError, "Unknown circuit breaker notifier: #{notifier_name}"
+      end
+
       @state_lock = Mutex.new
       @request_number = Concurrent::Atomic.new(0)
       @last_open_or_probed = nil
       @opened_at_request_number = 0
+      @clock = clock
     end
 
     # Public: executes supplied block of code and monitors failures.
@@ -100,7 +119,7 @@ module AllMyCircuits
     # Examples
     #
     #   @cb = AllMyCircuits::Breaker.new(
-    #     "that bad service",
+    #     name: "that bad service",
     #     sleep_seconds: 5,
     #     strategy: {
     #       name: :percentage_over_window,
@@ -156,25 +175,41 @@ module AllMyCircuits
     #                            before it was sent.
     #
     def success(current_request_number)
+      will_notify_notifier_closed = false
+
       @state_lock.synchronize do
         # This ensures that we are not closing the circuit prematurely
         # due to a response for an old request coming in.
         if open? && current_request_number > @opened_at_request_number
           close!
+          will_notify_notifier_closed = true
         end
         @strategy.success
+      end
+
+      # We don't want to be doing this while holding the lock
+      if will_notify_notifier_closed
+        @notifier.closed
       end
     end
 
     # Internal: marks request as failed. Opens the circuit if necessary.
     #
     def error(_)
+      will_notify_notifier_opened = false
+
       @state_lock.synchronize do
         return if open?
         @strategy.error
         if @strategy.should_open?
           open!
+          will_notify_notifier_opened = true
         end
+      end
+
+      # We don't want to be doing this while holding the lock
+      if will_notify_notifier_opened
+        @notifier.opened
       end
     end
 

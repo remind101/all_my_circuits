@@ -1,5 +1,4 @@
 require "minitest_helper"
-require "all_my_circuits"
 
 class TestWindow < AllMyCircuitsTC
   def setup

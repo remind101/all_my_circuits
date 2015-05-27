@@ -1,25 +1,10 @@
 require "minitest_helper"
-require "all_my_circuits"
 
 class TestAllMyCircuits < AllMyCircuitsTC
   class SimulatedFailure < StandardError; end
 
   test "has version number" do
     refute_nil ::AllMyCircuits::VERSION
-  end
-
-  class FakeClock
-    def initialize
-      @seconds = 1
-    end
-
-    def timestamp
-      @seconds
-    end
-
-    def advance(by_seconds = 1)
-      @seconds += by_seconds
-    end
   end
 
   def setup

@@ -1,5 +1,4 @@
 require "minitest_helper"
-require "all_my_circuits"
 require "thread"
 
 class TestAllMyCircuitsAcrossMultipleThreads < AllMyCircuitsTC
