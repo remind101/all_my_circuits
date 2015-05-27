@@ -5,23 +5,18 @@ class TestBreaker < AllMyCircuitsTC
     @clock = FakeClock.new
   end
 
-  def make_breaker(strategy_overrides: {}, notifier_overrides: {})
+  def make_breaker(strategy: {}, notifier: {})
     AllMyCircuits::Breaker.new(
       name: "my service",
       sleep_seconds: 5,
       clock: @clock,
-      strategy: {
-        name: :fake_strategy,
-        should_open: proc { false }
-      }.merge(strategy_overrides),
-      notifier: {
-        name: :fake_notifier
-      }.merge(notifier_overrides)
+      strategy: FakeStrategy.new(strategy),
+      notifier: FakeNotifier.new("my service", notifier)
     )
   end
 
   test "lets request through when closed" do
-    breaker = make_breaker(strategy_overrides: { should_open: proc { false } })
+    breaker = make_breaker(strategy: { should_open: proc { false } })
     ran = false
     breaker.run do
       ran = true
@@ -30,7 +25,7 @@ class TestBreaker < AllMyCircuitsTC
   end
 
   test "rejects request and raises AllMyCircuits::BreakerOpen if open" do
-    breaker = make_breaker(strategy_overrides: { should_open: proc { true } })
+    breaker = make_breaker(strategy: { should_open: proc { true } })
     breaker.run { raise "uh-oh" } rescue nil # trip it open
     assert_raises AllMyCircuits::BreakerOpen do
       breaker.run { :whatevs }
@@ -39,35 +34,35 @@ class TestBreaker < AllMyCircuitsTC
 
   test "asks strategy whether should be opened on error" do
     asked = false
-    breaker = make_breaker(strategy_overrides: { should_open: proc { asked = true; true } })
+    breaker = make_breaker(strategy: { should_open: proc { asked = true; true } })
     breaker.run { raise "uh-oh" } rescue nil # trip it open
     assert asked, "expecte circuit breaker to ask strategy whether it should be opened"
   end
 
   test "notifies strategy on error" do
     notified = false
-    breaker = make_breaker(strategy_overrides: { error: proc { notified = true } })
+    breaker = make_breaker(strategy: { should_open: proc { false }, error: proc { notified = true } })
     breaker.run { raise "uh-oh" } rescue nil
     assert notified, "expected breaker to notify the strategy on error"
   end
 
   test "notifies strategy on success" do
     notified = false
-    breaker = make_breaker(strategy_overrides: { success: proc { notified = true } })
+    breaker = make_breaker(strategy: { should_open: proc { false }, success: proc { notified = true } })
     breaker.run { "success" }
     assert notified, "expected breaker to notify the strategy on success"
   end
 
   test "notifies strategy on opened" do
     notified = false
-    breaker = make_breaker(strategy_overrides: { should_open: proc { true }, opened: proc { notified = true } })
+    breaker = make_breaker(strategy: { should_open: proc { true }, opened: proc { notified = true } })
     breaker.run { raise "uh-oh" } rescue nil # trip it open
     assert notified, "expecte circuit breaker to notify the strategy when opened"
   end
 
   test "notifies strategy on closed" do
     notified = false
-    breaker = make_breaker(strategy_overrides: { should_open: proc { true }, closed: proc { notified = true } })
+    breaker = make_breaker(strategy: { should_open: proc { true }, closed: proc { notified = true } })
     breaker.run { raise "uh-oh" } rescue nil # trip it open
     @clock.advance(5)
     breaker.run { "wild success" }
@@ -75,7 +70,7 @@ class TestBreaker < AllMyCircuitsTC
   end
 
   test "on success closes the circuit" do
-    breaker = make_breaker(strategy_overrides: { should_open: proc { true } })
+    breaker = make_breaker(strategy: { should_open: proc { true } })
     breaker.run { raise "uh-oh" } rescue nil # trip it open
     @clock.advance(5)
     breaker.run { "wild success" }
@@ -85,8 +80,8 @@ class TestBreaker < AllMyCircuitsTC
   test "when opened, notifies notifier" do
     opened_breaker = nil
     breaker = make_breaker(
-      strategy_overrides: { should_open: proc { true } },
-      notifier_overrides: { opened: proc { |breaker_name| opened_breaker = breaker_name } }
+      strategy: { should_open: proc { true } },
+      notifier: { opened: proc { |breaker_name| opened_breaker = breaker_name } }
     )
     breaker.run { raise "uh-oh" } rescue nil # trip it open
     assert_equal "my service", opened_breaker
@@ -95,8 +90,8 @@ class TestBreaker < AllMyCircuitsTC
   test "when closed, notifies notifier" do
     closed_breaker = nil
     breaker = make_breaker(
-      strategy_overrides: { should_open: proc { true } },
-      notifier_overrides: { closed: proc { |breaker_name| closed_breaker = breaker_name } }
+      strategy: { should_open: proc { true } },
+      notifier: { closed: proc { |breaker_name| closed_breaker = breaker_name } }
     )
     breaker.run { raise "uh-oh" } rescue nil # trip it open
     @clock.advance(5)
