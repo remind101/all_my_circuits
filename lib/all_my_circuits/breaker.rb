@@ -4,6 +4,8 @@ require "thread"
 module AllMyCircuits
 
   class Breaker
+    include Logging
+
     attr_reader :name
 
     # Public: exceptions typically thrown when using Net::HTTP
@@ -134,11 +136,11 @@ module AllMyCircuits
     #
     def run
       unless allow_request?
+        debug "declining request, circuit is open", name
         raise BreakerOpen, @name
       end
 
-      current_request_number = @request_number.update { |v| v + 1 }
-
+      current_request_number = generate_request_number
       begin
         yield
         success(current_request_number)
@@ -159,6 +161,13 @@ module AllMyCircuits
       end
     end
 
+    def generate_request_number
+      current_request_number = @request_number.update { |v| v + 1 }
+
+      debug "new request", name, current_request_number
+      current_request_number
+    end
+
     # Internal: markes request as successful. Closes the circuit if necessary.
     #
     # Arguments
@@ -169,12 +178,18 @@ module AllMyCircuits
       will_notify_notifier_closed = false
 
       @state_lock.synchronize do
-        # This ensures that we are not closing the circuit prematurely
-        # due to a response for an old request coming in.
-        if open? && current_request_number > @opened_at_request_number
-          close!
-          will_notify_notifier_closed = true
+        if open?
+          # This ensures that we are not closing the circuit prematurely
+          # due to a response for an old request coming in.
+          if current_request_number > @opened_at_request_number
+            info "closing circuit", name, current_request_number
+            close!
+            will_notify_notifier_closed = true
+          else
+            debug "ignoring late success response", name, current_request_number
+          end
         end
+        debug "request succeeded", name, current_request_number
         @strategy.success
       end
 
@@ -186,13 +201,20 @@ module AllMyCircuits
 
     # Internal: marks request as failed. Opens the circuit if necessary.
     #
-    def error(_)
+    def error(current_request_number)
       will_notify_notifier_opened = false
 
       @state_lock.synchronize do
-        return if open?
+        if open?
+          debug "ignoring late error response (circuit is open)", name, current_request_number
+          return
+        end
+
+        debug "request failed. #{@strategy.inspect}", name, current_request_number
         @strategy.error
+
         if @strategy.should_open?
+          info "opening circuit", name, current_request_number
           open!
           will_notify_notifier_opened = true
         end
@@ -210,6 +232,7 @@ module AllMyCircuits
 
     def allow_probe_request?
       if open? && @clock.timestamp >= (@last_open_or_probed + @sleep_seconds)
+        debug "allowing probe request", name
         # makes sure that we allow only one probe request by extending sleep interval
         # and leaving the circuit open until closed by the success callback.
         @last_open_or_probed = @clock.timestamp

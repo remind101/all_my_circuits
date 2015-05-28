@@ -66,6 +66,11 @@ the Fake Service has 3 modes of operation: `up` (default), `die` and `slowdown`.
 runs `WORKERS` number of workers which continuously hit http://localhost:8081. Graphs are served at http://localhost:8080.
 This app allows to catch incorrect circuit breaker behavior visually.
 
+# Logging
+
+Logger can be configured by setting `AllMyCircuits.logger`.
+Default log device is STDERR, and default level is ERROR (can be overridden with `ALL_MY_CIRCUITS_LOG_LEVEL` environment variable).
+
 # TODO
 
   * global controls through redis?

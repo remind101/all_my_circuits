@@ -34,6 +34,10 @@ module AllMyCircuits
         def full?
           @window.length == @number_of_events
         end
+
+        def inspect
+          "#<%s:0x%x size: %d, counts: %s, full: %s" % [self.class.name, object_id, @number_of_events, @counters, full?]
+        end
       end
 
     end

@@ -8,7 +8,6 @@ module AllMyCircuits
     # AllMyCircuits::Strategies::PercentageOverWindowStrategy for examples.
     #
     class AbstractStrategy
-
       # Public: called whenever a request has ran successfully through circuit breaker.
       #
       def success
