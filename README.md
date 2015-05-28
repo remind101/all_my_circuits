@@ -1,7 +1,10 @@
 # AllMyCircuits
+
+[![Circle CI](https://circleci.com/gh/remind101/all_my_circuits.svg?style=svg&circle-token=3c0f7294a61e095f789f369f96bdd266ddd80258)](https://circleci.com/gh/remind101/all_my_circuits)
+
 ![funny image goes here](https://raw.githubusercontent.com/remind101/all_my_circuits/master/all_my_circuits.jpg?token=AAc0YcX8xOhT0o4_Ko-IxKEEQk2PTUJYks5VaR0ywA%3D%3D)
 
-AllMyCircuits is intended to be a threadsafe circuit breaker implementation for Ruby.
+AllMyCircuits is intended to be a threadsafe-ish circuit breaker implementation for Ruby.
 See [Martin Fowler's article on the Circuit Breaker pattern for more info](http://martinfowler.com/bliki/CircuitBreaker.html).
 
 # Usage
@@ -13,8 +16,7 @@ See [Martin Fowler's article on the Circuit Breaker pattern for more info](http:
         @circuit_breaker = AllMyCircuits::Breaker.new(
           name: "my_service",
           sleep_seconds: 10,                            # leave circuit open for 10 seconds, than try to call the service again
-          strategy: {
-            name: :percentage_over_window,
+          strategy: AllMyCircuits::Strategies::PercentageOverWindowStrategy.new(
             requests_window: 100,                       # number of requests to calculate the average failure rate for
             failure_rate_percent_threshold: 25          # open circuit if 25% or more requests within 100-request window fail
                                                         #   must trip open again if the first request fails

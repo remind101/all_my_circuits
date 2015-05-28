@@ -4,21 +4,6 @@ require "thread"
 module AllMyCircuits
 
   class Breaker
-
-    # Extend this dictionary to add more strategies
-    #
-    STRATEGIES = {
-      nil                     => Strategies::PercentageWindowStrategy,
-      :percentage_over_window => Strategies::PercentageWindowStrategy,
-      :number_over_window     => Strategies::NumberWindowStrategy
-    }
-
-    # Extend this dictionary to add more notifiers
-    #
-    NOTIFIERS = {
-      nil          => Notifiers::NullNotifier
-    }
-
     attr_reader :name
 
     # Public: Initializes circuit breaker instance.
@@ -27,54 +12,42 @@ module AllMyCircuits
     #
     #   name          - name of the call wrapped into circuit breaker (e.g. "That Unstable Service").
     #   sleep_seconds - number of seconds the circuit stays open before attempting to close.
-    #   strategy      - a hash with circuit breaker behavior config; varies per strategy.
-    #                   Available strategies:
-    #                     :percentage_over_window (default),
-    #                     :number_over_window.
-    #   notifier      - optional hash with circuit breaker notifier config; varies per notifier.
-    #                   Available notifiers:
-    #                     :null (default).
+    #   strategy      - an AllMyCircuits::Strategies::AbstractStrategy-compliant object that controls
+    #                   when the circuit should be tripped open.
+    #                   Built-in strategies:
+    #                     AllMyCircuits::Strategies::PercentageOverWindowStrategy,
+    #                     AllMyCircuits::Strategies::NumberOverWindowStrategy.
+    #   notifier      - (optional) AllMyCircuits::Notifiers::AbstractNotifier-compliant object that
+    #                   is called whenever circuit breaker state (open, closed) changes.
+    #                   Built-in notifiers:
+    #                     AllMyCircuits::Notifiers::NullNotifier.
     #
     # Examples
     #
     #   AllMyCircuits::Breaker.new(
     #     name: "My Unstable Service",
     #     sleep_seconds: 5,
-    #     strategy: {
-    #       name: :percentage_over_window,
+    #     strategy: AllMyCircuits::Strategies::PercentageOverWindowStrategy.new(
     #       requests_window: 20,                 # number of requests in the window to calculate failure rate for
     #       failure_rate_percent_threshold: 25   # how many failures can occur within the window, in percent,
-    #     }                                      #   before the circuit opens
+    #     )                                      #   before the circuit opens
     #   )
     #
     #   AllMyCircuits::Breaker.new(
     #     name: "Another Unstable Service",
     #     sleep_seconds: 5,
-    #     strategy: {
-    #       name: :number_over_window,
+    #     strategy: AllMyCircuits::Strategies::NumberOverWindowStrategy.new(
     #       requests_window: 20,
     #       failures_threshold: 25         # how many failures can occur within the window before the circuit opens
-    #     }
+    #     )
     #   )
     #
-    def initialize(name:, sleep_seconds:, strategy:, notifier: {}, clock: Clock)
+    def initialize(name:, sleep_seconds:, strategy:, notifier: Notifiers::NullNotifier.new, clock: Clock)
       @name = name.dup.freeze
       @sleep_seconds = sleep_seconds
 
-      begin
-        strategy_name = strategy.delete(:name)
-        # ALL access to the @strategy must happen while holding the @state_lock!
-        @strategy = STRATEGIES.fetch(strategy_name).new(**strategy)
-      rescue KeyError
-        raise ArgumentError, "Unknown circuit breaker strategy: #{strategy_name}"
-      end
-
-      begin
-        notifier_name = notifier.delete(:name)
-        @notifier = NOTIFIERS.fetch(notifier_name).new(@name, **notifier)
-      rescue KeyError
-        raise ArgumentError, "Unknown circuit breaker notifier: #{notifier_name}"
-      end
+      @strategy = strategy
+      @notifier = notifier
 
       @state_lock = Mutex.new
       @request_number = Concurrent::Atomic.new(0)
@@ -121,11 +94,10 @@ module AllMyCircuits
     #   @cb = AllMyCircuits::Breaker.new(
     #     name: "that bad service",
     #     sleep_seconds: 5,
-    #     strategy: {
-    #       name: :percentage_over_window,
+    #     strategy: AllMyCircuits::Strategies::PercentageOverWindowStrategy.new(
     #       requests_window: 10,
     #       failure_rate_percent_threshold: 50
-    #     }
+    #     )
     #   )
     #
     #   @client = MyBadServiceClient.new(timeout: 2)

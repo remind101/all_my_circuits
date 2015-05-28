@@ -13,11 +13,10 @@ class TestAllMyCircuitsAcrossMultipleThreads < AllMyCircuitsTC
     @breaker = AllMyCircuits::Breaker.new(
       name: "test service circuit breaker",
       sleep_seconds: 2,
-      strategy: {
-        name: :number_over_window,
+      strategy: AllMyCircuits::Strategies::NumberOverWindowStrategy.new(
         requests_window: 10,
         failures_threshold: 10
-      }
+      )
     )
   end
 
@@ -78,7 +77,7 @@ class TestAllMyCircuitsAcrossMultipleThreads < AllMyCircuitsTC
           request = requests.pop
           begin
             @breaker.run do
-              raise "service unavailable" if request.action == :fail
+              raise SimulatedFailure, "service unavailable" if request.action == :fail
               log "success"
               responses.push :succeeded
             end
