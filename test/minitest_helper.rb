@@ -1,9 +1,12 @@
 $LOAD_PATH.unshift File.expand_path('../../lib', __FILE__)
+require "bundler/setup"
 require "all_my_circuits"
 
 require "minitest/autorun"
 
 class AllMyCircuitsTC < Minitest::Test
+  class SimulatedFailure < StandardError; end
+
   class FakeClock
     def initialize
       @time = 0
@@ -19,8 +22,6 @@ class AllMyCircuitsTC < Minitest::Test
   end
 
   class FakeStrategy
-    AllMyCircuits::Breaker::STRATEGIES[:fake_strategy] = self
-
     def initialize(should_open:, error: proc {}, success: proc {}, opened: proc {}, closed: proc {}, **kwargs)
       @should_open = should_open
       @error = error
@@ -51,8 +52,6 @@ class AllMyCircuitsTC < Minitest::Test
   end
 
   class FakeNotifier
-    AllMyCircuits::Breaker::NOTIFIERS[:fake_notifier] = self
-
     def initialize(breaker_name, opened: proc {}, closed: proc {}, **kwargs)
       @name = breaker_name
       @opened = opened

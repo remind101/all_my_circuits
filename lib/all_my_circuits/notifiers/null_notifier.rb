@@ -1,8 +1,10 @@
 module AllMyCircuits
   module Notifiers
 
+    # Public: no-op implementation of AbstractNotifier.
+    #
     class NullNotifier < AbstractNotifier
-      def initialize(breaker_name, **kwargs)
+      def initialize(*args, **kwargs)
       end
 
       def opened

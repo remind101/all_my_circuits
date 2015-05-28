@@ -7,7 +7,6 @@ require "thread"
 require "net/http"
 require "uri"
 require "timeout"
-# require_relative "./../../cb2/lib/cb2"
 require "securerandom"
 
 WORKERS = Integer(ENV["WORKERS"]) rescue 25
@@ -17,18 +16,11 @@ def setup
   @breaker = AllMyCircuits::Breaker.new(
     name: "test service circuit breaker",
     sleep_seconds: 10,
-    strategy: {
-      name: :percentage_over_window,
+    strategy: AllMyCircuits::Strategies::PercentageOverWindowStrategy.new(
       requests_window: 40,
       failure_rate_percent_threshold: 25
-    }
+    )
   )
-  # @breaker = CB2::Breaker.new(
-  #   strategy: :percentage,
-  #   duration: 5,
-  #   reenable_after: 10,
-  #   threshold: 50
-  # )
   @datapoints_queue = Queue.new
   @commands_queue = Queue.new
 end
@@ -61,7 +53,7 @@ def run_workers
               responses.push(status: :succeeded, started: t1, finished: Time.now)
             end
           end
-        rescue AllMyCircuits::BreakerOpen#, CB2::BreakerOpen
+        rescue AllMyCircuits::BreakerOpen
           log "breaker open"
           responses.push(status: :skipped, started: t1, finished: Time.now)
         rescue
