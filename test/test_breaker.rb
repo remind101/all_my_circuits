@@ -28,9 +28,10 @@ class TestBreaker < AllMyCircuitsTC
   test "rejects request and raises AllMyCircuits::BreakerOpen if open" do
     breaker = make_breaker(strategy: { should_open: proc { true } })
     breaker.run { raise SimulatedFailure, "uh-oh" } rescue nil # trip it open
-    assert_raises AllMyCircuits::BreakerOpen do
+    e = assert_raises AllMyCircuits::BreakerOpen do
       breaker.run { :whatevs }
     end
+    assert_includes "my service", e.message
   end
 
   test "re-raises watched errors" do
