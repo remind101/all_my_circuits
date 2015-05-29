@@ -142,8 +142,9 @@ module AllMyCircuits
 
       current_request_number = generate_request_number
       begin
-        yield
+        result = yield
         success(current_request_number)
+        result
       rescue *@watch_errors
         error(current_request_number)
         raise

@@ -18,11 +18,10 @@ class TestBreaker < AllMyCircuitsTC
 
   test "lets request through when closed" do
     breaker = make_breaker(strategy: { should_open: proc { false } })
-    ran = false
-    breaker.run do
-      ran = true
+    result = breaker.run do
+      :such_result
     end
-    assert ran, "expected request to run through circuit breaker"
+    assert_equal :such_result, result
   end
 
   test "rejects request and raises AllMyCircuits::BreakerOpen if open" do

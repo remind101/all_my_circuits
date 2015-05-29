@@ -3,9 +3,8 @@ require "minitest_helper"
 class TestNullBreaker < AllMyCircuitsTC
   test "aways allows requests when initialized to be closed" do
     breaker = make_breaker(closed: true)
-    ran = false
-    breaker.run { ran = true }
-    assert ran, "expected null breaker that is closed to allow all requests"
+    result = breaker.run { :such_result }
+    assert_equal :such_result, result
   end
 
   test "aways rejects requests when initialized to be open" do
