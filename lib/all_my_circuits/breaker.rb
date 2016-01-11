@@ -1,4 +1,4 @@
-require "concurrent/atomic"
+require 'concurrent/atomics'
 require "thread"
 
 module AllMyCircuits
@@ -71,7 +71,7 @@ module AllMyCircuits
       @notifier = notifier
 
       @state_lock = Mutex.new
-      @request_number = Concurrent::Atomic.new(0)
+      @request_number = Concurrent::AtomicReference.new(0)
       @last_open_or_probed = nil
       @opened_at_request_number = 0
       @clock = clock
