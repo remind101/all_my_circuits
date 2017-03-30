@@ -23,7 +23,9 @@ module AllMyCircuits
         Net::HTTPBadResponse,
         Net::HTTPFatalError,
         Net::HTTPHeaderSyntaxError,
-        Net::HTTPServerError,
+        Net::HTTPBadGateway,
+        Net::HTTPServiceUnavailable,
+        Net::HTTPGatewayTimeOut,
         Net::ProtocolError,
         SocketError,
         Timeout::Error
