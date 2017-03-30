@@ -14,9 +14,24 @@ module AllMyCircuits
       require "timeout"
       require "net/http"
 
-      [Timeout::Error, Errno::ECONNRESET, Errno::ECONNREFUSED, EOFError,
-       Net::HTTPBadResponse, Net::HTTPHeaderSyntaxError, Net::HTTPFatalError, Net::HTTPServerError]
+      [
+        EOFError,
+        Errno::ECONNREFUSED,
+        Errno::ECONNRESET,
+        Errno::ETIMEDOUT,
+        IOError,
+        Net::HTTPBadResponse,
+        Net::HTTPFatalError,
+        Net::HTTPHeaderSyntaxError,
+        Net::HTTPBadGateway,
+        Net::HTTPServiceUnavailable,
+        Net::HTTPGatewayTimeOut,
+        Net::ProtocolError,
+        SocketError,
+        Timeout::Error
+      ]
     end
+
 
     # Public: Initializes circuit breaker instance.
     #
