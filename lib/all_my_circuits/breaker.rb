@@ -41,6 +41,9 @@ module AllMyCircuits
     #   watch_errors  - exceptions to count as failures. Other exceptions will simply get re-raised
     #                   (default: AllMyCircuits::Breaker.net_errors).
     #   sleep_seconds - number of seconds the circuit stays open before attempting to close.
+    #                   If given an object that responds to #call, it will call #call with the number
+    #                   of times this circuit has been open consecutively. This can be used to exponentially
+    #                   backoff.
     #   strategy      - an AllMyCircuits::Strategies::AbstractStrategy-compliant object that controls
     #                   when the circuit should be tripped open.
     #                   Built-in strategies:
@@ -80,7 +83,12 @@ module AllMyCircuits
 
       @name = String(name).dup.freeze
       @watch_errors = Array(watch_errors).dup
-      @sleep_seconds = Integer(sleep_seconds)
+
+      if sleep_seconds.respond_to?(:call)
+        @timeout = sleep_seconds
+      else
+        @timeout = proc { sleep_seconds }
+      end
 
       @strategy = strategy
       @notifier = notifier
@@ -88,6 +96,7 @@ module AllMyCircuits
       @state_lock = Mutex.new
       @request_number = Concurrent::AtomicReference.new(0)
       @last_open_or_probed = nil
+      @probe_count = 0
       @opened_at_request_number = 0
       @clock = clock
     end
@@ -184,7 +193,7 @@ module AllMyCircuits
       current_request_number
     end
 
-    # Internal: markes request as successful. Closes the circuit if necessary.
+    # Internal: marks request as successful. Closes the circuit if necessary.
     #
     # Arguments
     #   current_request_number - the number assigned to the request by the circuit breaker
@@ -246,12 +255,18 @@ module AllMyCircuits
       @opened_at_request_number > 0
     end
 
+    def breaker_expired?
+      seconds = @timeout.call(@probe_count + 1)
+      @clock.timestamp >= (@last_open_or_probed + seconds)
+    end
+
     def allow_probe_request?
-      if open? && @clock.timestamp >= (@last_open_or_probed + @sleep_seconds)
+      if open? && breaker_expired?
         debug "allowing probe request", name
         # makes sure that we allow only one probe request by extending sleep interval
         # and leaving the circuit open until closed by the success callback.
         @last_open_or_probed = @clock.timestamp
+        @probe_count += 1
         return true
       end
       false
@@ -271,6 +286,7 @@ module AllMyCircuits
 
     def close!
       @last_open_or_probed = 0
+      @probe_count = 0
       @opened_at_request_number = 0
       @strategy.closed
     end
