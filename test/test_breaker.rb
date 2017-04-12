@@ -5,11 +5,11 @@ class TestBreaker < AllMyCircuitsTC
     @clock = FakeClock.new
   end
 
-  def make_breaker(strategy: {}, notifier: {}, watch_errors: [SimulatedFailure])
+  def make_breaker(strategy: {}, notifier: {}, watch_errors: [SimulatedFailure], sleep_seconds: 5)
     AllMyCircuits::Breaker.new(
       name: "my service",
       watch_errors: watch_errors,
-      sleep_seconds: 5,
+      sleep_seconds: sleep_seconds,
       clock: @clock,
       strategy: FakeStrategy.new({ should_open: proc { false } }.merge(strategy)),
       notifier: FakeNotifier.new("my service", notifier)
@@ -119,5 +119,61 @@ class TestBreaker < AllMyCircuitsTC
     @clock.advance(5)
     breaker.run { "wild success" }
     assert_equal "my service", closed_breaker
+  end
+
+  test "dynamic sleep_seconds" do
+    mock = Minitest::Mock.new
+    breaker = make_breaker(
+      strategy: { should_open: proc { true } },
+      sleep_seconds: proc { |n| mock.call(n) }
+    )
+
+    # Open circuit
+    assert_raises(SimulatedFailure) { breaker.run { raise SimulatedFailure, "uh-oh" } }
+
+    # Circuit is open, checks if timeout expired (no)
+    mock.expect(:call, 1, [1])
+    assert_raises(AllMyCircuits::BreakerOpen) { breaker.run { "open after 0s" } }
+    mock.verify
+
+    @clock.advance(1)
+    # Circuit is open, checks if timeout expired (yes)
+    mock.expect(:call, 1, [1])
+    breaker.run { "closed after 1s" }
+    mock.verify
+
+    # Open circuit
+    assert_raises(SimulatedFailure) { breaker.run { raise SimulatedFailure, "uh-oh" } }
+
+    # Circuit is open, checks if timeout expired (no)
+    mock.expect(:call, 1, [1])
+    assert_raises(AllMyCircuits::BreakerOpen) { breaker.run { "open after 0s" } }
+    mock.verify
+
+    @clock.advance(1)
+
+    # Circuit is open, checks if timeout expired (yes)
+    mock.expect(:call, 1, [1])
+    assert_raises(SimulatedFailure) { breaker.run { raise SimulatedFailure, "raises in probe request" } }
+    mock.verify
+
+    # Circuit is open, checks if timeout expired (no)
+    mock.expect(:call, 2, [2])
+    assert_raises(AllMyCircuits::BreakerOpen) { breaker.run { "open after 0s" } }
+    mock.verify
+
+    @clock.advance(1)
+
+    # Circuit is open, checks if timeout expired (no)
+    mock.expect(:call, 2, [2])
+    assert_raises(AllMyCircuits::BreakerOpen) { breaker.run { "open after 1s" } }
+    mock.verify
+
+    @clock.advance(1)
+
+    # Circuit is open, checks if timeout expired (yes)
+    mock.expect(:call, 2, [2])
+    breaker.run { "closed after 1s" }
+    mock.verify
   end
 end
